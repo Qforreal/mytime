@@ -1,15 +1,23 @@
 import { CheckCircle2, Clock3, Flame, ListChecks, Target, TrendingUp } from 'lucide-react'
-import { useMemo } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useAppStore } from '../store/AppStore'
 import { formatFocusDuration, toDateKey } from '../utils/date'
 import { focusSecondsForDate, focusSummaryThisWeek, lastSevenDays, weekTaskSummary } from '../utils/stats'
 
 export function StatsPage() {
   const { data } = useAppStore()
-  const trend = useMemo(() => lastSevenDays(data), [data])
-  const weekTasks = weekTaskSummary(data.tasks)
-  const todaySeconds = focusSecondsForDate(data.focusRecords, toDateKey())
-  const weekFocus = focusSummaryThisWeek(data.focusRecords)
+  const [todayKey, setTodayKey] = useState(() => toDateKey())
+  useEffect(() => {
+    const refreshDate = () => setTodayKey(toDateKey())
+    const timer = window.setInterval(refreshDate, 60_000)
+    refreshDate()
+    return () => window.clearInterval(timer)
+  }, [])
+  const todayDate = useMemo(() => new Date(`${todayKey}T12:00:00`), [todayKey])
+  const trend = useMemo(() => lastSevenDays(data, todayKey), [data, todayKey])
+  const weekTasks = useMemo(() => weekTaskSummary(data.tasks, todayDate), [data.tasks, todayDate])
+  const todaySeconds = useMemo(() => focusSecondsForDate(data.focusRecords, todayKey), [data.focusRecords, todayKey])
+  const weekFocus = useMemo(() => focusSummaryThisWeek(data.focusRecords, todayDate), [data.focusRecords, todayDate])
   const totalTrendMinutes = trend.reduce((sum, day) => sum + day.focusMinutes, 0)
 
   return (
@@ -56,7 +64,16 @@ export function StatsPage() {
             </p>
             <div className="insight-progress">
               <div><span>任务完成</span><b>{weekTasks.rate}%</b></div>
-              <div className="metric-progress" aria-label={`本周任务完成率 ${weekTasks.rate}%`}><span style={{ width: `${weekTasks.rate}%` }} /></div>
+              <div
+                className="metric-progress"
+                role="progressbar"
+                aria-label={`本周任务完成率 ${weekTasks.rate}%`}
+                aria-valuemin={0}
+                aria-valuemax={100}
+                aria-valuenow={weekTasks.rate}
+              >
+                <span style={{ width: `${weekTasks.rate}%` }} />
+              </div>
             </div>
           </section>
 
@@ -98,6 +115,12 @@ function FocusTrendChart({ data }: { data: ReturnType<typeof lastSevenDays> }) {
       <svg className="trend-chart" viewBox="0 0 720 270" role="img" aria-labelledby="trend-title trend-desc">
         <title id="trend-title">近 7 天专注时间趋势</title>
         <desc id="trend-desc">{data.map((day) => `${day.label} ${day.focusMinutes} 分钟`).join('，')}</desc>
+        <defs>
+          <linearGradient id="chart-gradient" x1="0" y1="1" x2="0" y2="0">
+            <stop offset="0%" stopColor="var(--primary)" />
+            <stop offset="100%" stopColor="var(--blue)" />
+          </linearGradient>
+        </defs>
         {[0, 0.5, 1].map((ratio) => {
           const y = chartBottom - usableHeight * ratio
           return (

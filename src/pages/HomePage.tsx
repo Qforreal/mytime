@@ -1,10 +1,21 @@
-import { ArrowRight, CalendarDays, CheckCircle2, Clock3, Heart, Lightbulb, Plus, Timer } from 'lucide-react'
-import { useMemo, useState } from 'react'
+import {
+  ArrowRight,
+  Brain,
+  CalendarDays,
+  CheckCircle2,
+  Clock3,
+  Heart,
+  Lightbulb,
+  Plus,
+  Search,
+  Timer,
+} from 'lucide-react'
+import { useEffect, useMemo, useState } from 'react'
 import { learningTips } from '../data/learningContent'
 import { useAppStore } from '../store/AppStore'
 import type { Task } from '../types'
 import { formatFocusDuration, formatFullDate, toDateKey } from '../utils/date'
-import { todaySummary } from '../utils/stats'
+import { lastSevenDays, todaySummary } from '../utils/stats'
 import { ConfirmDialog, Modal } from '../components/Modal'
 import { TaskEditor, type TaskFormValue } from '../components/TaskEditor'
 import { TaskList } from '../components/TaskList'
@@ -30,7 +41,17 @@ export function HomePage({ navigate, showToast }: HomePageProps) {
     toggleTask,
     toggleFavoriteTip,
   } = useAppStore()
-  const summary = useMemo(() => todaySummary(data), [data])
+  const [todayKey, setTodayKey] = useState(() => toDateKey())
+  useEffect(() => {
+    const refreshDate = () => setTodayKey(toDateKey())
+    const timer = window.setInterval(refreshDate, 60_000)
+    refreshDate()
+    return () => window.clearInterval(timer)
+  }, [])
+  const summary = useMemo(() => todaySummary(data, todayKey), [data, todayKey])
+  const trend = useMemo(() => lastSevenDays(data, todayKey), [data, todayKey])
+  const trendMinutes = trend.reduce((total, day) => total + day.focusMinutes, 0)
+  const trendMaximum = Math.max(1, ...trend.map((day) => day.focusMinutes))
   const [editorOpen, setEditorOpen] = useState(false)
   const [editingTask, setEditingTask] = useState<Task | null>(null)
   const [deletingTask, setDeletingTask] = useState<Task | null>(null)
@@ -75,13 +96,23 @@ export function HomePage({ navigate, showToast }: HomePageProps) {
             <strong>{summary.completed}<small> / {summary.tasks.length}</small></strong>
           </div>
         </div>
-        <div className="metric-card">
+        <div
+          className="metric-card metric-progress-card"
+          style={{ '--progress-angle': `${Math.max(0.01, summary.completionRate) * 3.6}deg` } as React.CSSProperties}
+        >
           <div className="metric-icon metric-blue"><CalendarDays aria-hidden="true" /></div>
           <div>
             <span>完成进度</span>
-            <strong>{summary.completionRate}<small>%</small></strong>
+            <strong aria-live="polite">{summary.completionRate}<small>%</small></strong>
           </div>
-          <div className="metric-progress" aria-label={`完成进度 ${summary.completionRate}%`}>
+          <div
+            className="metric-progress"
+            role="progressbar"
+            aria-label="今日任务完成进度"
+            aria-valuemin={0}
+            aria-valuemax={100}
+            aria-valuenow={summary.completionRate}
+          >
             <span style={{ width: `${summary.completionRate}%` }} />
           </div>
         </div>
@@ -94,12 +125,55 @@ export function HomePage({ navigate, showToast }: HomePageProps) {
         </div>
       </section>
 
+      <section className="home-command-strip" aria-label="快捷操作与近七天趋势">
+        <div className="home-quick-actions">
+          <button type="button" onClick={() => navigate('pomodoro')}>
+            <span className="quick-action-icon quick-focus"><Timer aria-hidden="true" /></span>
+            <span><strong>开始专注</strong><small>{data.settings.focusMinutes} 分钟</small></span>
+          </button>
+          <button type="button" onClick={openAdd}>
+            <span className="quick-action-icon quick-task"><Plus aria-hidden="true" /></span>
+            <span><strong>添加任务</strong><small>快速记录</small></span>
+          </button>
+          <button type="button" onClick={() => navigate('search')}>
+            <span className="quick-action-icon quick-search"><Search aria-hidden="true" /></span>
+            <span><strong>查找资料</strong><small>可靠来源</small></span>
+          </button>
+          <button type="button" onClick={() => navigate('advice')}>
+            <span className="quick-action-icon quick-advice"><Brain aria-hidden="true" /></span>
+            <span><strong>智能规划</strong><small>生成安排</small></span>
+          </button>
+        </div>
+
+        <button
+          className="home-trend-card"
+          type="button"
+          aria-label={`查看数据统计，近七天专注 ${trendMinutes} 分钟`}
+          onClick={() => navigate('stats')}
+        >
+          <span className="home-trend-copy">
+            <small>近 7 天专注</small>
+            <strong>{trendMinutes}<em> 分钟</em></strong>
+          </span>
+          <span className="home-spark-bars" aria-hidden="true">
+            {trend.map((day) => (
+              <i
+                key={day.date}
+                className={day.label === '今天' ? 'is-today' : ''}
+                style={{ height: `${18 + (day.focusMinutes / trendMaximum) * 82}%` }}
+              />
+            ))}
+          </span>
+          <ArrowRight aria-hidden="true" />
+        </button>
+      </section>
+
       <div className="home-layout">
         <section className="content-section task-section">
           <div className="section-heading">
             <div>
               <h2>今日任务</h2>
-              <p>{summary.tasks.length ? `还有 ${summary.tasks.length - summary.completed} 项待完成` : '从一个小目标开始'}</p>
+              <p>{summary.tasks.length ? `${summary.completionRate}% 已完成 · 还有 ${summary.tasks.length - summary.completed} 项待完成` : '从一个小目标开始'}</p>
             </div>
             <button className="text-button" type="button" onClick={() => navigate('plans')}>
               查看计划 <ArrowRight aria-hidden="true" />
@@ -161,7 +235,7 @@ export function HomePage({ navigate, showToast }: HomePageProps) {
       <TaskEditor
         open={editorOpen}
         task={editingTask}
-        initialDate={toDateKey()}
+        initialDate={todayKey}
         onClose={() => setEditorOpen(false)}
         onSubmit={saveTask}
       />

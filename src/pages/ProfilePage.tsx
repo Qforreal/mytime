@@ -1,3 +1,5 @@
+import { Capacitor } from '@capacitor/core'
+import { LocalNotifications } from '@capacitor/local-notifications'
 import { BookHeart, CheckCircle2, Clock3, Database, Download, FileUp, Heart, Moon, Settings, Sun, Trash2 } from 'lucide-react'
 import { useMemo, useRef, useState } from 'react'
 import { ConfirmDialog } from '../components/Modal'
@@ -9,9 +11,10 @@ import { focusSecondsThisWeek, taskCompletionRate } from '../utils/stats'
 interface ProfilePageProps {
   navigate: (page: string) => void
   showToast: (text: string, type?: 'success' | 'info') => void
+  onClearData: () => void
 }
 
-export function ProfilePage({ navigate, showToast }: ProfilePageProps) {
+export function ProfilePage({ navigate, showToast, onClearData }: ProfilePageProps) {
   const {
     data,
     updateSettings,
@@ -22,6 +25,10 @@ export function ProfilePage({ navigate, showToast }: ProfilePageProps) {
   } = useAppStore()
   const inputRef = useRef<HTMLInputElement>(null)
   const [confirm, setConfirm] = useState<'all' | 'focus' | null>(null)
+  // Keep an edit buffer only while a field is being edited. When it is empty,
+  // render the persisted setting directly so imports/external updates stay in sync.
+  const [focusDraft, setFocusDraft] = useState<string | null>(null)
+  const [breakDraft, setBreakDraft] = useState<string | null>(null)
   const favorites = useMemo(
     () => ({
       methods: learningMethods.filter((item) => data.favoriteMethodIds.includes(item.id)),
@@ -38,17 +45,50 @@ export function ProfilePage({ navigate, showToast }: ProfilePageProps) {
       showToast('专注完成提醒已关闭', 'info')
       return
     }
+    if (Capacitor.isNativePlatform()) {
+      try {
+        const current = await LocalNotifications.checkPermissions()
+        const permission = current.display === 'granted' ? current : await LocalNotifications.requestPermissions()
+        if (permission.display === 'granted') {
+          updateSettings({ notifications: true })
+          showToast('专注完成提醒已开启')
+        } else {
+          showToast('未获得通知权限，请在系统设置中允许知时发送通知', 'info')
+        }
+      } catch {
+        showToast('通知权限暂时不可用，请检查系统设置', 'info')
+      }
+      return
+    }
     if (!('Notification' in window)) {
       showToast('当前浏览器不支持系统通知', 'info')
       return
     }
-    const permission = await Notification.requestPermission()
-    if (permission === 'granted') {
-      updateSettings({ notifications: true })
-      showToast('专注完成提醒已开启')
-    } else {
-      showToast('未获得通知权限，可在浏览器设置中重新开启', 'info')
+    try {
+      const permission = await Notification.requestPermission()
+      if (permission === 'granted') {
+        updateSettings({ notifications: true })
+        showToast('专注完成提醒已开启')
+      } else {
+        showToast('未获得通知权限，可在浏览器设置中重新开启', 'info')
+      }
+    } catch {
+      showToast('通知权限暂时不可用，请检查浏览器设置', 'info')
     }
+  }
+
+  const commitTimerMinutes = (kind: 'focus' | 'break', rawValue: string) => {
+    const minimum = kind === 'focus' ? 5 : 1
+    const maximum = kind === 'focus' ? 90 : 30
+    const fallback = kind === 'focus' ? 25 : 5
+    const parsed = Number(rawValue)
+    const minutes = Math.min(
+      maximum,
+      Math.max(minimum, Number.isFinite(parsed) && parsed > 0 ? Math.round(parsed) : fallback),
+    )
+    if (kind === 'focus') setFocusDraft(null)
+    else setBreakDraft(null)
+    updateSettings(kind === 'focus' ? { focusMinutes: minutes } : { breakMinutes: minutes })
   }
 
   const downloadData = () => {
@@ -152,8 +192,8 @@ export function ProfilePage({ navigate, showToast }: ProfilePageProps) {
               <label className="switch"><input aria-label="完成提醒" type="checkbox" checked={data.settings.notifications} onChange={() => void toggleNotifications()} /><span /></label>
             </div>
             <div className="setting-inputs">
-              <label className="field"><span>专注时长</span><div className="number-with-unit"><input type="number" min="5" max="90" step="5" value={data.settings.focusMinutes} onChange={(event) => updateSettings({ focusMinutes: Math.min(90, Math.max(5, Number(event.target.value) || 25)) })} /><em>分钟</em></div></label>
-              <label className="field"><span>休息时长</span><div className="number-with-unit"><input type="number" min="1" max="30" value={data.settings.breakMinutes} onChange={(event) => updateSettings({ breakMinutes: Math.min(30, Math.max(1, Number(event.target.value) || 5)) })} /><em>分钟</em></div></label>
+              <label className="field"><span>专注时长</span><div className="number-with-unit"><input type="number" min="5" max="90" step="1" inputMode="numeric" value={focusDraft ?? String(data.settings.focusMinutes)} onChange={(event) => setFocusDraft(event.target.value)} onBlur={(event) => commitTimerMinutes('focus', event.currentTarget.value)} onKeyDown={(event) => { if (event.key === 'Enter') event.currentTarget.blur() }} /><em>分钟</em></div></label>
+              <label className="field"><span>休息时长</span><div className="number-with-unit"><input type="number" min="1" max="30" step="1" inputMode="numeric" value={breakDraft ?? String(data.settings.breakMinutes)} onChange={(event) => setBreakDraft(event.target.value)} onBlur={(event) => commitTimerMinutes('break', event.currentTarget.value)} onKeyDown={(event) => { if (event.key === 'Enter') event.currentTarget.blur() }} /><em>分钟</em></div></label>
             </div>
           </section>
 
@@ -161,15 +201,15 @@ export function ProfilePage({ navigate, showToast }: ProfilePageProps) {
             <div className="settings-heading"><Database aria-hidden="true" /><div><h2>数据管理</h2><p>导出备份或迁移数据</p></div></div>
             <button className="button button-secondary button-block" type="button" onClick={downloadData}><Download aria-hidden="true" /> 导出数据</button>
             <button className="button button-secondary button-block" type="button" onClick={() => inputRef.current?.click()}><FileUp aria-hidden="true" /> 导入数据</button>
-            <input ref={inputRef} className="sr-only" type="file" accept="application/json,.json" onChange={(event) => void handleImport(event.target.files?.[0])} />
+            <input ref={inputRef} className="sr-only" type="file" accept="application/json,.json" aria-label="选择要导入的学习数据文件" onChange={(event) => void handleImport(event.target.files?.[0])} />
             <button className="button button-danger-quiet button-block" type="button" onClick={() => setConfirm('all')}><Trash2 aria-hidden="true" /> 清除学习数据</button>
             <p className="data-note">数据仅保存在当前浏览器。清除浏览器站点数据也会删除记录。</p>
           </section>
         </aside>
       </div>
 
-      <ConfirmDialog open={confirm === 'focus'} title="清空专注记录" message="所有专注时长与番茄记录都会被删除，确定继续吗？" confirmLabel="清空记录" danger onClose={() => setConfirm(null)} onConfirm={() => { clearFocusRecords(); showToast('专注记录已清空') }} />
-      <ConfirmDialog open={confirm === 'all'} title="清除学习数据" message="任务、专注记录和收藏都会被清除，设置会保留。此操作无法恢复。" confirmLabel="确认清除" danger onClose={() => setConfirm(null)} onConfirm={() => { clearData(); showToast('学习数据已清除') }} />
+      <ConfirmDialog open={confirm === 'focus'} title="清空专注记录" message="所有专注时长与番茄记录都会被删除，确定继续吗？" confirmLabel="清空记录" danger onClose={() => setConfirm(null)} onConfirm={() => { onClearData(); clearFocusRecords(); showToast('专注记录已清空') }} />
+      <ConfirmDialog open={confirm === 'all'} title="清除学习数据" message="任务、专注记录和收藏都会被清除，设置会保留。此操作无法恢复。" confirmLabel="确认清除" danger onClose={() => setConfirm(null)} onConfirm={() => { onClearData(); clearData(); showToast('学习数据已清除') }} />
     </div>
   )
 }

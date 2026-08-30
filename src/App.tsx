@@ -47,9 +47,21 @@ function pageFromHash(): PageId {
 
 export function App() {
   const pomodoro = usePomodoro()
+  const { snapshot: pomodoroSnapshot, reset: resetPomodoro } = pomodoro
   const [currentPage, setCurrentPage] = useState<PageId>(pageFromHash)
   const [toast, setToast] = useState<ToastMessage | null>(null)
   const [mobileMoreOpen, setMobileMoreOpen] = useState(false)
+
+  const showToast = useCallback((text: string, type: 'success' | 'info' = 'success') => {
+    setToast({ id: Date.now(), text, type })
+  }, [])
+  const closeToast = useCallback(() => setToast(null), [])
+
+  useEffect(() => {
+    if (!pomodoro.completionNotice) return
+    const timer = window.setTimeout(() => showToast(pomodoro.completionNotice?.message ?? ''), 0)
+    return () => window.clearTimeout(timer)
+  }, [pomodoro.completionNotice, showToast])
 
   useEffect(() => {
     const handleHash = () => setCurrentPage(pageFromHash())
@@ -71,10 +83,11 @@ export function App() {
     setMobileMoreOpen(false)
   }, [])
 
-  const showToast = useCallback((text: string, type: 'success' | 'info' = 'success') => {
-    setToast({ id: Date.now(), text, type })
-  }, [])
-  const closeToast = useCallback(() => setToast(null), [])
+  const activePage = pages.find((page) => page.id === currentPage) ?? pages[0]
+  const ActivePageIcon = activePage.icon
+  const discardActiveTimer = useCallback(() => {
+    if (pomodoroSnapshot.status !== 'idle') resetPomodoro()
+  }, [pomodoroSnapshot.status, resetPomodoro])
 
   return (
     <div className="app-shell">
@@ -111,7 +124,7 @@ export function App() {
           <span className="brand-mark"><Clock3 aria-hidden="true" /></span>
           <span><strong>知时</strong><small>学习效率</small></span>
         </button>
-        <span>{pages.find((page) => page.id === currentPage)?.label}</span>
+        <span className="mobile-page-label"><ActivePageIcon aria-hidden="true" />{activePage.label}</span>
       </header>
 
       <main className="app-main" tabIndex={-1}>
@@ -123,7 +136,7 @@ export function App() {
         {currentPage === 'search' && <SearchPage navigate={navigate} />}
         {currentPage === 'advice' && <AdvicePage showToast={showToast} />}
         {currentPage === 'stats' && <StatsPage />}
-        {currentPage === 'profile' && <ProfilePage navigate={navigate} showToast={showToast} />}
+        {currentPage === 'profile' && <ProfilePage navigate={navigate} showToast={showToast} onClearData={discardActiveTimer} />}
       </main>
 
       <nav className="mobile-nav" aria-label="移动端主导航">

@@ -4,3 +4,6 @@ dist/
 .DS_Store
 
 .vercel
+
+# Android Studio machine-local metadata
+android/.idea/

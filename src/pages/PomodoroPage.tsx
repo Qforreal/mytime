@@ -1,5 +1,5 @@
-import { CheckCircle2, Pause, Play, RotateCcw, Square, TimerReset } from 'lucide-react'
-import { useMemo, useState } from 'react'
+import { Bell, CheckCircle2, Coffee, Pause, Play, RotateCcw, Square, Timer, TimerReset } from 'lucide-react'
+import { useEffect, useMemo, useState } from 'react'
 import { ConfirmDialog } from '../components/Modal'
 import type { PomodoroController } from '../hooks/usePomodoro'
 import { useAppStore } from '../store/AppStore'
@@ -18,19 +18,31 @@ function timerText(seconds: number): string {
 }
 
 export function PomodoroPage({ showToast, timer }: PomodoroPageProps) {
-  const { data } = useAppStore()
+  const { data, updateSettings } = useAppStore()
   const [selectedTaskId, setSelectedTaskId] = useState('')
   const [confirmAction, setConfirmAction] = useState<'reset' | 'end' | null>(null)
-  const todaySeconds = focusSecondsForDate(data.focusRecords, toDateKey())
-  const weekSeconds = focusSecondsThisWeek(data.focusRecords)
+  const [focusDraft, setFocusDraft] = useState(() => String(data.settings.focusMinutes))
+  const [breakDraft, setBreakDraft] = useState(() => String(data.settings.breakMinutes))
+  const [todayKey, setTodayKey] = useState(() => toDateKey())
+  useEffect(() => {
+    const refreshDate = () => setTodayKey(toDateKey())
+    const timerId = window.setInterval(refreshDate, 60_000)
+    refreshDate()
+    return () => window.clearInterval(timerId)
+  }, [])
+  const settingsLocked = timer.snapshot.status !== 'idle'
+
+  const todayDate = useMemo(() => new Date(`${todayKey}T12:00:00`), [todayKey])
+  const todaySeconds = focusSecondsForDate(data.focusRecords, todayKey)
+  const weekSeconds = useMemo(() => focusSecondsThisWeek(data.focusRecords, todayDate), [data.focusRecords, todayDate])
   const todayRecords = useMemo(
     () =>
       data.focusRecords
-        .filter((record) => toDateKey(new Date(record.endedAt)) === toDateKey())
+        .filter((record) => toDateKey(new Date(record.endedAt)) === todayKey)
         .sort((a, b) => b.endedAt.localeCompare(a.endedAt)),
-    [data.focusRecords],
+    [data.focusRecords, todayKey],
   )
-  const availableTasks = data.tasks.filter((task) => task.date === toDateKey() && !task.completed)
+  const availableTasks = data.tasks.filter((task) => task.date === todayKey && !task.completed)
   const elapsed = timer.snapshot.durationSeconds - timer.remainingSeconds
 
   const doReset = () => {
@@ -43,6 +55,20 @@ export function PomodoroPage({ showToast, timer }: PomodoroPageProps) {
     showToast(timer.snapshot.mode === 'focus' && elapsed > 0 ? '本次专注已记录' : '本轮已结束')
   }
 
+  const commitTimerMinutes = (kind: 'focus' | 'break', rawValue: string) => {
+    const minimum = kind === 'focus' ? 5 : 1
+    const maximum = kind === 'focus' ? 90 : 30
+    const fallback = kind === 'focus' ? 25 : 5
+    const parsed = Number(rawValue)
+    const minutes = Math.min(
+      maximum,
+      Math.max(minimum, Number.isFinite(parsed) && parsed > 0 ? Math.round(parsed) : fallback),
+    )
+    if (kind === 'focus') setFocusDraft(String(minutes))
+    else setBreakDraft(String(minutes))
+    updateSettings(kind === 'focus' ? { focusMinutes: minutes } : { breakMinutes: minutes })
+  }
+
   return (
     <div className="page pomodoro-page">
       <header className="page-heading compact-heading">
@@ -53,6 +79,17 @@ export function PomodoroPage({ showToast, timer }: PomodoroPageProps) {
         </div>
       </header>
 
+      {timer.completionNotice && (
+        <div className="timer-completion-notice" role="status" aria-live="polite">
+          <CheckCircle2 aria-hidden="true" />
+          <div>
+            <strong>{timer.completionNotice.message}</strong>
+            <span>{timer.completionNotice.mode === 'focus' ? '专注记录已保存' : '计时器已准备好下一轮专注'}</span>
+          </div>
+          <button type="button" className="text-button" onClick={timer.clearCompletionNotice}>知道了</button>
+        </div>
+      )}
+
       <div className="pomodoro-layout">
         <section className="timer-panel">
           <div className="segmented timer-mode" role="group" aria-label="计时模式">
@@ -62,6 +99,7 @@ export function PomodoroPage({ showToast, timer }: PomodoroPageProps) {
               disabled={timer.snapshot.status !== 'idle'}
               onClick={() => timer.switchMode('focus')}
             >
+              <Timer aria-hidden="true" />
               专注 {data.settings.focusMinutes} 分钟
             </button>
             <button
@@ -70,19 +108,20 @@ export function PomodoroPage({ showToast, timer }: PomodoroPageProps) {
               disabled={timer.snapshot.status !== 'idle'}
               onClick={() => timer.switchMode('break')}
             >
+              <Coffee aria-hidden="true" />
               休息 {data.settings.breakMinutes} 分钟
             </button>
           </div>
 
           <div
-            className="timer-ring"
+            className={`timer-ring timer-ring-${timer.snapshot.status}`}
             style={{ '--timer-progress': `${Math.max(0.012, timer.progress) * 360}deg` } as React.CSSProperties}
             role="timer"
             aria-label={`${timer.snapshot.mode === 'focus' ? '专注' : '休息'}剩余 ${timerText(timer.remainingSeconds)}`}
           >
             <div className="timer-face">
               <span>{timer.snapshot.mode === 'focus' ? '专注中' : '休息中'}</span>
-              <strong>{timerText(timer.remainingSeconds)}</strong>
+              <strong aria-live="polite">{timerText(timer.remainingSeconds)}</strong>
               <small>
                 {timer.snapshot.status === 'running'
                   ? '正在计时'
@@ -108,6 +147,50 @@ export function PomodoroPage({ showToast, timer }: PomodoroPageProps) {
               </select>
             </label>
           )}
+
+          <div className="timer-custom-settings" aria-label="自定义番茄钟时长">
+            <label className="field">
+              <span>专注时长</span>
+              <div className="number-with-unit">
+                <input
+                  type="number"
+                  min="5"
+                  max="90"
+                  step="1"
+                  inputMode="numeric"
+                  value={focusDraft}
+                  disabled={settingsLocked}
+                  onChange={(event) => setFocusDraft(event.target.value)}
+                  onBlur={(event) => commitTimerMinutes('focus', event.currentTarget.value)}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter') event.currentTarget.blur()
+                  }}
+                />
+                <em>分钟</em>
+              </div>
+            </label>
+            <label className="field">
+              <span>休息时长</span>
+              <div className="number-with-unit">
+                <input
+                  type="number"
+                  min="1"
+                  max="30"
+                  step="1"
+                  inputMode="numeric"
+                  value={breakDraft}
+                  disabled={settingsLocked}
+                  onChange={(event) => setBreakDraft(event.target.value)}
+                  onBlur={(event) => commitTimerMinutes('break', event.currentTarget.value)}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter') event.currentTarget.blur()
+                  }}
+                />
+                <em>分钟</em>
+              </div>
+            </label>
+          </div>
+          {settingsLocked && <p className="timer-settings-note">当前计时中，结束或重置后可修改时长。</p>}
 
           <div className="timer-actions">
             {timer.snapshot.status === 'running' ? (
@@ -138,6 +221,12 @@ export function PomodoroPage({ showToast, timer }: PomodoroPageProps) {
               <Square aria-hidden="true" />
             </button>
           </div>
+          {!data.settings.notifications && (
+            <a className="notification-hint" href="#/profile">
+              <Bell aria-hidden="true" />
+              开启完成提醒
+            </a>
+          )}
         </section>
 
         <aside className="focus-summary">

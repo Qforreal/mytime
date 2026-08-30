@@ -26,8 +26,8 @@ export function focusSummaryThisWeek(records: FocusRecord[], date = new Date()) 
   }
 }
 
-export function focusSecondsThisWeek(records: FocusRecord[]): number {
-  return focusSummaryThisWeek(records).focusSeconds
+export function focusSecondsThisWeek(records: FocusRecord[], date = new Date()): number {
+  return focusSummaryThisWeek(records, date).focusSeconds
 }
 
 export function taskCompletionRate(tasks: Task[]): number {
@@ -35,11 +35,10 @@ export function taskCompletionRate(tasks: Task[]): number {
   return Math.round((tasks.filter((task) => task.completed).length / tasks.length) * 100)
 }
 
-export function todaySummary(data: AppData) {
-  const today = toDateKey()
-  const tasks = data.tasks.filter((task) => task.date === today)
+export function todaySummary(data: AppData, dateKey = toDateKey()) {
+  const tasks = data.tasks.filter((task) => task.date === dateKey)
   const completed = tasks.filter((task) => task.completed).length
-  const focusSeconds = focusSecondsForDate(data.focusRecords, today)
+  const focusSeconds = focusSecondsForDate(data.focusRecords, dateKey)
   return {
     tasks,
     completed,
@@ -55,19 +54,18 @@ export interface DailyTrend {
   completedTasks: number
 }
 
-export function lastSevenDays(data: AppData): DailyTrend[] {
-  const today = toDateKey()
+export function lastSevenDays(data: AppData, todayKey = toDateKey()): DailyTrend[] {
   const formatter = new Intl.DateTimeFormat('zh-CN', { weekday: 'short' })
-  return Array.from({ length: 7 }, (_, index) => addDays(today, index - 6)).map((date) => ({
+  return Array.from({ length: 7 }, (_, index) => addDays(todayKey, index - 6)).map((date) => ({
     date,
-    label: date === today ? '今天' : formatter.format(new Date(`${date}T12:00:00`)),
+    label: date === todayKey ? '今天' : formatter.format(new Date(`${date}T12:00:00`)),
     focusMinutes: Math.round(focusSecondsForDate(data.focusRecords, date) / 60),
     completedTasks: data.tasks.filter((task) => task.date === date && task.completed).length,
   }))
 }
 
-export function weekTaskSummary(tasks: Task[]) {
-  const start = startOfWeekKey()
+export function weekTaskSummary(tasks: Task[], date = new Date()) {
+  const start = startOfWeekKey(date)
   const end = addDays(start, 6)
   const weekTasks = tasks.filter((task) => task.date >= start && task.date <= end)
   return {
