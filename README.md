@@ -35,12 +35,21 @@ npm run build
 
 项目已通过 Capacitor 生成 `android/` 工程。使用 Android Studio 打开 `android/` 目录即可继续编译 APK。
 
+> 原生工程使用 Capacitor 8，编译需要 Java 21 或更高版本。Android Studio 自带的 `jbr` 已满足要求；如果终端仍显示 JDK 17，请先把 `JAVA_HOME` 指向 Android Studio 的 `jbr`，再运行 Gradle。
+
 命令行流程：
 
 ```bash
 npm install
 npm run build
 npx cap sync android
+```
+
+Windows 终端示例（按本机 Android Studio 安装位置调整）：
+
+```powershell
+$env:JAVA_HOME = 'C:\Program Files\Android\Android Studio\jbr'
+.\android\gradlew.bat -p android assembleDebug
 ```
 
 然后在 Android Studio 中打开 `android/`，等待 Gradle 同步完成，再运行或构建 APK。应用 ID 为 `com.qforreal.mytime`，网页产物目录为 `dist`。
